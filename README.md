@@ -4,6 +4,8 @@ A small web app for the Tafarn y Fic pool team to track who's playing each match
 
 No build step and no server: open `index.html` in a browser, or host the folder on any static host (GitHub Pages, Netlify, etc.).
 
+The squad (17 players) is pre-loaded the first time the app opens; edit it on the Squad tab. The look is a purple / neon-green football-broadcast style.
+
 ## Features
 
 - **Fixtures** – next match, upcoming fixtures, matches that still need a score, and results.

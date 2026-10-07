@@ -4,22 +4,31 @@ const TEAM = "Tafarn y Fic";
 const KEY = "tafarn-y-fic-pool-v1";
 
 /* ---------- state ---------- */
-let state = load();
+let state;
 let tab = "fixtures";
 
+const SQUAD = ["Neil Broadley", "Aled Emyr", "Dafydd Evans", "Steffan Evens", "Dion Griffiths", "Llyr Hughes",
+  "Nick Hughes", "Gruff John", "Mark Jones", "Craig Owen", "Gavin Owen", "Harri Owen", "Iwan Owen", "Llion Owen",
+  "Dilwyn Roberts", "Jake Shenton", "Ricky Williams"];
+const uid = () => Math.random().toString(36).slice(2, 10);
+
 function load() {
+  let s = null;
   try {
-    const s = JSON.parse(localStorage.getItem(KEY));
-    if (s && Array.isArray(s.players) && Array.isArray(s.fixtures)) return s;
+    const x = JSON.parse(localStorage.getItem(KEY));
+    if (x && Array.isArray(x.players) && Array.isArray(x.fixtures)) s = x;
   } catch (e) { /* fall through */ }
-  return { players: [], fixtures: [] };
+  s = s || { players: [], fixtures: [] };
+  // First run: start with the team's squad (once only, so removing a player sticks).
+  if (!s.seeded && !s.players.length) s.players = SQUAD.map(name => ({ id: uid(), name }));
+  s.seeded = true;
+  return s;
 }
+state = load();
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch (e) { toast("Could not save - browser storage is full or blocked"); }
 }
-const uid = () => Math.random().toString(36).slice(2, 10);
-
 /* ---------- tiny DOM helper (no innerHTML => no injection from pasted data) ---------- */
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -118,20 +127,26 @@ function fixtureCard(f, highlight) {
   const d = new Date(f.date + "T12:00:00");
   const r = resultOf(f);
   const c = countsFor(f);
+  const crest = name => h("span", { class: "crest" + (name === TEAM ? " us" : "") }, initials(name));
+  const side = (name, cls) => h("div", { class: "side " + cls }, h("span", { class: "tname" }, name), crest(name));
+  const left = f.home ? TEAM : f.opponent, right = f.home ? f.opponent : TEAM;
+  const mid = r
+    ? h("div", { class: "scorebox " + r }, h("b", {}, f.home ? f.scoreFor : f.scoreAgainst), h("i", {}, "-"), h("b", {}, f.home ? f.scoreAgainst : f.scoreFor))
+    : h("div", { class: "kick" }, f.time || "TBC");
   return h("div", { class: "card fixture" + (highlight ? " next" : ""), tabindex: 0, onclick: () => openFixture(f.id),
       onkeydown: e => { if (e.key === "Enter") openFixture(f.id); } },
-    h("div", { class: "date" },
-      h("span", { class: "small muted" }, isNaN(d) ? "" : d.toLocaleDateString("en-GB", { weekday: "short" })),
-      h("b", {}, isNaN(d) ? "?" : d.getDate()),
-      h("span", { class: "small muted" }, isNaN(d) ? "" : d.toLocaleDateString("en-GB", { month: "short" }))),
-    h("div", { class: "main" },
-      h("div", { class: "opp" }, (f.home ? "v " : "@ ") + f.opponent),
-      h("div", { class: "small muted" }, [f.home ? "Home" : "Away", f.time, f.venue].filter(Boolean).join(" · ")),
-      !r && state.players.length ? h("div", { class: "counts" },
-        h("span", { class: "dot yes" }, `${c.yes} in`),
-        h("span", { class: "dot maybe" }, `${c.maybe} maybe`),
-        h("span", { class: "dot no" }, `${c.no} out`)) : null),
-    r ? h("div", { class: "score" }, `${f.scoreFor}-${f.scoreAgainst} `, h("span", { class: "pill " + r }, r)) : null);
+    h("div", { class: "fx-head" },
+      h("span", {}, isNaN(d) ? f.date : fmtDate(f.date)),
+      h("span", {}, [f.venue, r ? { W: "Win", D: "Draw", L: "Loss" }[r] : null].filter(Boolean).join(" · "))),
+    h("div", { class: "fx-body" }, side(left, "l"), mid, side(right, "r")),
+    !r && state.players.length ? h("div", { class: "counts" },
+      h("span", { class: "dot yes" }, `${c.yes} in`),
+      h("span", { class: "dot maybe" }, `${c.maybe} maybe`),
+      h("span", { class: "dot no" }, `${c.no} out`)) : null);
+}
+function initials(name) {
+  const w = name.replace(/[^A-Za-z0-9 ]/g, "").split(/\s+/).filter(w => !/^(the|y|of|fc)$/i.test(w));
+  return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] || "?").slice(0, 2)).toUpperCase();
 }
 
 /* ---------- fixture detail ---------- */
