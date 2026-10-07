@@ -11,6 +11,7 @@ const SQUAD = ["Neil Broadley", "Aled Emyr", "Dafydd Evans", "Steffan Evens", "D
   "Nick Hughes", "Gruff John", "Mark Jones", "Craig Owen", "Gavin Owen", "Harri Owen", "Iwan Owen", "Llion Owen",
   "Dilwyn Roberts", "Jake Shenton", "Ricky Williams"];
 const uid = () => Math.random().toString(36).slice(2, 10);
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 function load() {
   let s = null;
@@ -19,8 +20,10 @@ function load() {
     if (x && Array.isArray(x.players) && Array.isArray(x.fixtures)) s = x;
   } catch (e) { /* fall through */ }
   s = s || { players: [], fixtures: [] };
+  s.players.forEach((p, i) => { if (p.order == null) p.order = i; });
   // First run: start with the team's squad (once only, so removing a player sticks).
-  if (!s.seeded && !s.players.length) s.players = SQUAD.map(name => ({ id: uid(), name }));
+  // Fixed ids, so two phones seeding the same team can never create duplicates.
+  if (!s.seeded && !s.players.length) s.players = SQUAD.map((name, order) => ({ id: "p-" + slug(name), name, order }));
   s.seeded = true;
   // Same for the league fixtures.
   if (!s.fixturesSeeded && !s.fixtures.length) s.fixtures = leagueFixtures();
@@ -41,13 +44,23 @@ const LEAGUE = [
 ];
 function leagueFixtures() {
   return LEAGUE.map(([week, date, opponent, home]) =>
-    ({ id: uid(), week, date, time: "", opponent, home: !!home, venue: "", avail: {}, played: {}, frames: {} }));
+    ({ id: "wk" + week, week, date, time: "", opponent, home: !!home, venue: "", avail: {}, played: {}, frames: {} }));
 }
 state = load();
-function save() {
+
+function persistLocal() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch (e) { toast("Could not save - browser storage is full or blocked"); }
 }
+// Saves on this device and, when connected to a team, sends only what changed to the shared database.
+function save() {
+  persistLocal();
+  if (sync.on) {
+    sync.mod.push(sync.teamId, sync.base, state, () => toast("Couldn't save to the shared database"));
+    sync.base = snap();
+  }
+}
+const snap = () => JSON.parse(JSON.stringify({ players: state.players, fixtures: state.fixtures }));
 /* ---------- tiny DOM helper (no innerHTML => no injection from pasted data) ---------- */
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -100,7 +113,9 @@ document.querySelectorAll(".tabs button").forEach(b =>
 
 function render() {
   const view = document.getElementById("view");
-  view.replaceChildren(({ fixtures: viewFixtures, squad: viewSquad, stats: viewStats, data: viewData })[tab]());
+  const gated = needsGate();
+  document.querySelector(".tabs").hidden = gated;
+  view.replaceChildren(gated ? viewGate() : ({ fixtures: viewFixtures, squad: viewSquad, stats: viewStats, data: viewData })[tab]());
 }
 
 /* ---------- fixtures tab ---------- */
@@ -243,7 +258,14 @@ function openFixture(id) {
     drawing = false;
   };
   draw();
-  dialog(`${f.home ? "v" : "@"} ${f.opponent}`, body);
+  // Called when someone else's change arrives while this fixture is open.
+  window.__redraw = () => {
+    if (!state.fixtures.includes(f)) { document.getElementById("dlg").close(); return; }
+    const a = document.activeElement;
+    if (a && body.contains(a) && /INPUT|TEXTAREA/.test(a.tagName)) return; // don't yank a box someone is typing in
+    draw();
+  };
+  dialog(`${f.home ? "v" : "@"} ${f.opponent}`, body, () => { window.__redraw = null; });
 }
 
 function openFixtureForm(existing) {
@@ -362,7 +384,8 @@ function viewSquad() {
   const add = () => {
     const name = input.value.trim();
     if (!name) return;
-    state.players.push({ id: uid(), name });
+    const order = Math.max(-1, ...state.players.map(p => p.order ?? 0)) + 1;
+    state.players.push({ id: uid(), name, order });
     save(); render();
     document.querySelector("#view input[type=text]").focus();
   };
@@ -420,9 +443,19 @@ function viewData() {
       state = s; save(); toast("Backup restored"); render();
     }).catch(() => toast("That file is not a valid backup"));
   } });
-  return h("div", {}, h("h2", {}, "Data"),
+  const sharing = sync.code
+    ? h("div", { class: "card" },
+        h("p", {}, h("b", {}, "Shared with your team. "), "Changes on any phone appear on everyone's phone."),
+        h("p", { class: "small muted" }, "Team code: ", h("b", {}, sync.code), ". Anyone with the code can view and edit, so only share it with the team."),
+        h("div", { class: "row" },
+          h("button", { class: "btn", onclick: copyInvite }, "Copy invite link"),
+          h("button", { class: "btn ghost", onclick: () => { if (confirm("Leave the team on this phone? The shared data is kept for everyone else.")) leaveTeam(); } }, "Leave team")))
+    : h("div", { class: "card" },
+        h("p", {}, h("b", {}, "This phone only. "), "Nothing you enter here is shared with the rest of the team."),
+        h("button", { class: "btn", onclick: () => { store.del(LOCAL_KEY); render(); } }, "Set up sharing"));
+  return h("div", {}, h("h2", {}, "Data"), sharing,
     h("div", { class: "card" },
-      h("p", {}, "Everything is stored in this browser on this device. To move it to a phone or share it with the team, download a backup and restore it on the other device."),
+      h("p", {}, "Download a backup of everything (squad, fixtures, attendance and scores), or restore one."),
       h("div", { class: "row" },
         h("button", { class: "btn", onclick: () => {
           const a = h("a", { href: URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: "application/json" })), download: `tafarn-y-fic-pool-${todayISO()}.json` });
@@ -440,7 +473,166 @@ function viewData() {
         save(); toast(n ? `Added ${n} league fixture(s)` : "All league fixtures are already here");
       } }, "Add missing league fixtures")),
     h("div", { class: "card" },
-      h("button", { class: "btn danger", onclick: () => { if (confirm("Delete ALL players, fixtures and scores?")) { state = { players: [], fixtures: [], seeded: true, fixturesSeeded: true }; save(); render(); } } }, "Delete everything")));
+      h("button", { class: "btn danger", onclick: () => {
+        const msg = sync.on ? "Delete ALL players, fixtures and scores for EVERYONE on the team?" : "Delete ALL players, fixtures and scores?";
+        if (confirm(msg)) { state.players = []; state.fixtures = []; save(); render(); }
+      } }, "Delete everything")));
 }
 
-render();
+/* ---------- sharing (live sync between phones) ---------- */
+const CODE_KEY = "tfp-team-code", LOCAL_KEY = "tfp-local-only";
+const store = {
+  get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } },
+  del: k => { try { localStorage.removeItem(k); } catch (e) { /* private mode */ } },
+};
+const sync = { mod: null, teamId: null, base: null, on: false, code: store.get(CODE_KEY), status: "local" };
+const gate = { code: "", error: "", busy: false };
+const needsGate = () => !sync.code && !store.get(LOCAL_KEY);
+
+// The team code is hashed into the database path, so the code itself never leaves the phone.
+async function teamIdFor(code) {
+  const norm = code.trim().toLowerCase().replace(/\s+/g, " ");
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tafarn-y-fic:" + norm));
+  return "t" + [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 40);
+}
+
+function setStatus(s) {
+  sync.status = s;
+  const el = document.getElementById("sync");
+  if (!el) return;
+  el.className = "sync " + s;
+  el.textContent = { live: "Live", offline: "Offline", connecting: "Connecting…", local: "This phone only", error: "Sync problem" }[s] || s;
+}
+
+function fixtureFromDoc(id, d) {
+  return { id, week: d.week, date: d.date, time: d.time || "", opponent: d.opponent, home: !!d.home, venue: d.venue || "",
+    scoreFor: d.scoreFor, scoreAgainst: d.scoreAgainst, notes: d.notes,
+    avail: { ...(d.avail || {}) }, played: { ...(d.played || {}) }, frames: { ...(d.frames || {}) } };
+}
+const sortPlayers = () => state.players.sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name));
+
+function replaceFromRemote(players, fixtures) {
+  state.players = players.map(p => ({ id: p.id, name: p.name, order: p.order ?? 0 }));
+  state.fixtures = fixtures.map(f => fixtureFromDoc(f.id, f));
+  sortPlayers();
+}
+
+// Someone else's change arrived. Update objects in place so an open fixture keeps pointing at live data.
+function applyRemote(kind, changes) {
+  for (const c of changes) {
+    if (kind === "players") {
+      if (c.type === "removed") { state.players = state.players.filter(p => p.id !== c.id); continue; }
+      const p = state.players.find(x => x.id === c.id);
+      if (p) { p.name = c.data.name; p.order = c.data.order ?? 0; }
+      else state.players.push({ id: c.id, name: c.data.name, order: c.data.order ?? 0 });
+    } else {
+      if (c.type === "removed") { state.fixtures = state.fixtures.filter(f => f.id !== c.id); continue; }
+      const nf = fixtureFromDoc(c.id, c.data);
+      const f = state.fixtures.find(x => x.id === c.id);
+      if (f) { for (const k of Object.keys(f)) delete f[k]; Object.assign(f, nf); }
+      else state.fixtures.push(nf);
+    }
+  }
+  sortPlayers();
+  sync.base = snap();
+  persistLocal();
+  if (window.__redraw) window.__redraw();
+  const a = document.activeElement;
+  if (!(a && a.closest && a.closest("#view") && /INPUT|TEXTAREA|SELECT/.test(a.tagName))) render();
+}
+
+// mode: "create" (new team, starts from this phone's data), "join" (existing team) or "resume" (saved code).
+async function startSync(code, mode) {
+  setStatus("connecting");
+  let mod;
+  try { mod = await import("./sync.js"); }
+  catch (e) { setStatus("offline"); throw new Error("Couldn't load sharing. Check you're online and try again."); }
+  try {
+    const teamId = await teamIdFor(code);
+    const res = await mod.connect(teamId, { onChange: applyRemote, onStatus: setStatus });
+    if (res.offline && mode !== "resume") throw new Error("Couldn't reach the shared database. Check your signal and try again.");
+    const empty = !res.offline && !res.players.length && !res.fixtures.length;
+    if (mode === "create" && !empty) throw new Error("That code is already taken. Pick a different one, or use Join team.");
+    if (mode === "join" && empty) throw new Error("No team found for that code. Check the spelling.");
+
+    sync.mod = mod; sync.teamId = teamId; sync.code = code; sync.on = true;
+    if (mode === "create") {
+      sync.base = { players: [], fixtures: [] };
+      save(); // sends everything on this phone to the new team
+    } else {
+      if (!res.offline) { replaceFromRemote(res.players, res.fixtures); persistLocal(); }
+      sync.base = snap();
+    }
+    store.set(CODE_KEY, code); store.del(LOCAL_KEY);
+    if (res.offline) setStatus("offline");
+  } catch (e) {
+    mod.disconnect();
+    sync.on = false;
+    setStatus(sync.code ? "error" : "local"); // no saved team => nothing was ever connected
+    throw e.code === "permission-denied"
+      ? new Error("The shared database isn't ready yet (its security rules haven't been published).")
+      : e;
+  }
+}
+
+function leaveTeam() {
+  if (sync.mod) sync.mod.disconnect();
+  sync.on = false; sync.code = null; sync.mod = null;
+  store.del(CODE_KEY); store.set(LOCAL_KEY, "1");
+  setStatus("local");
+  render();
+}
+
+function copyInvite() {
+  const url = location.origin + location.pathname + "#code=" + encodeURIComponent(sync.code);
+  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+    .then(() => toast("Invite link copied"))
+    .catch(() => prompt("Copy this invite link:", url));
+}
+
+function viewGate() {
+  const input = h("input", { type: "text", value: gate.code, placeholder: "a few words you'll remember", autocapitalize: "off",
+    autocomplete: "off", spellcheck: "false", "aria-label": "Team code" });
+  const go = async mode => {
+    gate.code = input.value.trim();
+    gate.error = "";
+    if (gate.code.length < 6) { gate.error = "Use at least 6 characters, for example a few words."; render(); return; }
+    gate.busy = true; render();
+    try { await startSync(gate.code, mode); gate.code = ""; } catch (e) { gate.error = e.message; }
+    gate.busy = false; render();
+  };
+  return h("div", {}, h("h2", {}, "Join your team"),
+    h("div", { class: "card" },
+      h("p", {}, "Everyone on the team uses the same team code, so attendance and scores update live on every phone."),
+      h("label", {}, "Team code", input),
+      gate.error ? h("p", { class: "err" }, gate.error) : null,
+      h("div", { class: "row" },
+        h("button", { class: "btn", disabled: gate.busy, onclick: () => go("join") }, gate.busy ? "Connecting…" : "Join team"),
+        h("button", { class: "btn ghost", disabled: gate.busy, onclick: () => go("create") }, "Create new team")),
+      h("p", { class: "small muted" }, "First person: Create new team and pick a code. Everyone else: Join team with that code, or open the invite link.")),
+    h("p", { class: "small" }, h("a", { href: "#", onclick: e => { e.preventDefault(); store.set(LOCAL_KEY, "1"); setStatus("local"); render(); } }, "Use on this phone only")));
+}
+
+async function boot() {
+  const m = location.hash.match(/code=([^&]+)/);
+  const inviteCode = m ? decodeURIComponent(m[1]).trim() : null;
+  if (m) history.replaceState(null, "", location.pathname + location.search);
+  const saved = sync.code;
+  setStatus(saved || inviteCode ? "connecting" : "local");
+  render();
+  if (inviteCode && inviteCode !== saved) {
+    gate.busy = true; render();
+    try { await startSync(inviteCode, "join"); }
+    catch (e) {
+      gate.code = inviteCode; gate.error = e.message;
+      if (saved) { try { await startSync(saved, "resume"); } catch (e2) { toast(e2.message); } }
+    }
+    gate.busy = false;
+  } else if (saved) {
+    try { await startSync(saved, "resume"); } catch (e) { toast(e.message); }
+  }
+  render();
+}
+
+boot();

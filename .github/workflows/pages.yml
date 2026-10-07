@@ -26,7 +26,7 @@ jobs:
       - name: Keep only the site files
         run: |
           mkdir _site
-          cp index.html app.js style.css _site/
+          cp index.html app.js sync.js firebase-config.js style.css _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

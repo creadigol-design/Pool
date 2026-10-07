@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// The team's data lives under teams/{teamId}/..., where teamId is a hash of the
+// team code. Nothing can list or read "teams" itself, so you can only reach a
+// team's data if you know its code. Writes are limited to the expected fields.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /teams/{team}/players/{id} {
+      allow read, delete: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['name', 'order'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() < 60;
+    }
+
+    match /teams/{team}/fixtures/{id} {
+      allow read, delete: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(
+          ['week', 'date', 'time', 'opponent', 'home', 'venue', 'scoreFor', 'scoreAgainst', 'notes', 'avail', 'played', 'frames'])
+        && request.resource.data.opponent is string
+        && request.resource.data.opponent.size() < 80;
+    }
+  }
+}

@@ -43,6 +43,19 @@ body {
   color: var(--purple); display: grid; place-items: center; font-weight: 900; font-size: 1.2rem;
   box-shadow: 0 0 0 3px var(--purple), 0 0 0 5px var(--green);
 }
+.sync {
+  margin-left: auto; flex: none; font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+  padding: 4px 10px; border-radius: 99px; border: 1px solid rgba(255,255,255,.35); color: #fff; white-space: nowrap;
+}
+.sync::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: #aaa; }
+.sync.live { border-color: var(--green); color: var(--green); }
+.sync.live::before { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.sync.offline::before, .sync.connecting::before { background: #ffd23f; }
+.sync.error { border-color: var(--pink); }
+.sync.error::before { background: var(--pink); }
+main a { color: var(--purple); font-weight: 700; }
+.err { color: var(--pink); font-weight: 700; margin: 0 0 10px; }
+.tabs[hidden] { display: none; }
 .tabs { display: flex; gap: 2px; max-width: 820px; margin: 14px auto 0; overflow-x: auto; }
 .tabs button {
   flex: 1; background: transparent; color: #fff; border: 0; padding: 11px 14px; font: inherit;
