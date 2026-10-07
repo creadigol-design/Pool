@@ -631,6 +631,15 @@ async function boot() {
     gate.busy = false;
   } else if (saved) {
     try { await startSync(saved, "resume"); } catch (e) { toast(e.message); }
+  } else if (window.DEFAULT_TEAM_CODE && !store.get(LOCAL_KEY)) {
+    // First visit on this phone: join the built-in team, creating it if nobody has yet.
+    const code = window.DEFAULT_TEAM_CODE;
+    gate.busy = true; setStatus("connecting"); render();
+    try {
+      try { await startSync(code, "join"); }
+      catch (e) { if (/No team found/.test(e.message)) await startSync(code, "create"); else throw e; }
+    } catch (e) { gate.code = ""; gate.error = e.message; }
+    gate.busy = false;
   }
   render();
 }
