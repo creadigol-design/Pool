@@ -577,8 +577,9 @@ async function startSync(code, mode) {
     mod.disconnect();
     sync.on = false;
     setStatus(sync.code ? "error" : "local"); // no saved team => nothing was ever connected
-    throw e.code === "permission-denied"
-      ? new Error("The shared database isn't ready yet (its security rules haven't been published).")
+    // Show Google's own wording, so a rules/setup problem can be told apart from a typo or signal problem.
+    throw e.code
+      ? new Error(`The shared database refused the connection (${e.code}): ${e.message}`)
       : e;
   }
 }
