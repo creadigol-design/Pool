@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f5132">
+<title>Tafarn y Fic Pool Team</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="ball" aria-hidden="true">8</span>
+    <div>
+      <h1>Tafarn y Fic</h1>
+      <p>Pool team · fixtures, attendance &amp; scores</p>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button data-tab="fixtures" class="active">Fixtures</button>
+    <button data-tab="squad">Squad</button>
+    <button data-tab="stats">Stats</button>
+    <button data-tab="data">Data</button>
+  </nav>
+</header>
+
+<main id="view"></main>
+
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
