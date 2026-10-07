@@ -546,7 +546,7 @@ function applyRemote(kind, changes) {
 async function startSync(code, mode) {
   setStatus("connecting");
   let mod;
-  try { mod = await import("./sync.js"); }
+  try { mod = await import("./sync.js?v=" + (window.APP_V || "dev")); }
   catch (e) { setStatus("offline"); throw new Error("Couldn't load sharing. Check you're online and try again."); }
   try {
     const teamId = await teamIdFor(code);
