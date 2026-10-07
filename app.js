@@ -22,7 +22,26 @@ function load() {
   // First run: start with the team's squad (once only, so removing a player sticks).
   if (!s.seeded && !s.players.length) s.players = SQUAD.map(name => ({ id: uid(), name }));
   s.seeded = true;
+  // Same for the league fixtures.
+  if (!s.fixturesSeeded && !s.fixtures.length) s.fixtures = leagueFixtures();
+  s.fixturesSeeded = true;
   return s;
+}
+
+/* Division 2, season 2026-27 (from the printed fixture card).
+   [week, date, opponent, home?]. Weeks 10-18 are the return fixtures: same opponents, home/away swapped.
+   Free weeks: 8 and 17. */
+const LEAGUE = [
+  [1, "2026-09-16", "Pendeitch", 0], [2, "2026-09-23", "Copa Reds", 1], [3, "2026-09-30", "Yr Afr", 1],
+  [4, "2026-10-14", "Clwb Bach", 0], [5, "2026-10-21", "Tyn Llan A", 1], [6, "2026-10-28", "Crown B", 0],
+  [7, "2026-11-11", "HITW A", 1], [9, "2026-11-25", "Pennionyn B", 1],
+  [10, "2027-01-06", "Pendeitch", 1], [11, "2027-01-13", "Copa Reds", 0], [12, "2027-01-27", "Yr Afr", 0],
+  [13, "2027-02-10", "Clwb Bach", 1], [14, "2027-02-24", "Tyn Llan A", 0], [15, "2027-03-03", "Crown B", 1],
+  [16, "2027-03-10", "HITW A", 0], [18, "2027-03-24", "Pennionyn B", 0],
+];
+function leagueFixtures() {
+  return LEAGUE.map(([week, date, opponent, home]) =>
+    ({ id: uid(), week, date, time: "", opponent, home: !!home, venue: "", avail: {}, played: {}, frames: {} }));
 }
 state = load();
 function save() {
@@ -136,7 +155,7 @@ function fixtureCard(f, highlight) {
   return h("div", { class: "card fixture" + (highlight ? " next" : ""), tabindex: 0, onclick: () => openFixture(f.id),
       onkeydown: e => { if (e.key === "Enter") openFixture(f.id); } },
     h("div", { class: "fx-head" },
-      h("span", {}, isNaN(d) ? f.date : fmtDate(f.date)),
+      h("span", {}, (f.week ? `Wk ${f.week} · ` : "") + (isNaN(d) ? f.date : fmtDate(f.date))),
       h("span", {}, [f.venue, r ? { W: "Win", D: "Draw", L: "Loss" }[r] : null].filter(Boolean).join(" · "))),
     h("div", { class: "fx-body" }, side(left, "l"), mid, side(right, "r")),
     !r && state.players.length ? h("div", { class: "counts" },
@@ -411,7 +430,17 @@ function viewData() {
         } }, "Download backup"),
         h("button", { class: "btn ghost", onclick: () => fileInput.click() }, "Restore backup"), fileInput)),
     h("div", { class: "card" },
-      h("button", { class: "btn danger", onclick: () => { if (confirm("Delete ALL players, fixtures and scores?")) { state = { players: [], fixtures: [] }; save(); render(); } } }, "Delete everything")));
+      h("p", {}, "Division 2 2026-27 fixtures come pre-loaded. If any are missing, this adds them back without touching scores you've entered."),
+      h("button", { class: "btn ghost", onclick: () => {
+        let n = 0;
+        for (const f of leagueFixtures()) {
+          if (state.fixtures.some(x => x.date === f.date && x.opponent.toLowerCase() === f.opponent.toLowerCase())) continue;
+          state.fixtures.push(f); n++;
+        }
+        save(); toast(n ? `Added ${n} league fixture(s)` : "All league fixtures are already here");
+      } }, "Add missing league fixtures")),
+    h("div", { class: "card" },
+      h("button", { class: "btn danger", onclick: () => { if (confirm("Delete ALL players, fixtures and scores?")) { state = { players: [], fixtures: [], seeded: true, fixturesSeeded: true }; save(); render(); } } }, "Delete everything")));
 }
 
 render();

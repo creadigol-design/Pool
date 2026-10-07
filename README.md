@@ -4,7 +4,7 @@ A small web app for the Tafarn y Fic pool team to track who's playing each match
 
 No build step and no server: open `index.html` in a browser, or host the folder on any static host (GitHub Pages, Netlify, etc.).
 
-The squad (17 players) is pre-loaded the first time the app opens; edit it on the Squad tab. The look is a purple / neon-green football-broadcast style.
+The squad (17 players) and the Division 2 2026-27 fixtures (16 matches; weeks 8 and 17 are free weeks) are pre-loaded the first time the app opens; edit it on the Squad tab. The look is a purple / neon-green football-broadcast style.
 
 ## Features
 
