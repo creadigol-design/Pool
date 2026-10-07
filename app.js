@@ -12,6 +12,7 @@ const SQUAD = ["Neil Broadley", "Aled Emyr", "Dafydd Evans", "Steffan Evens", "D
   "Dilwyn Roberts", "Jake Shenton", "Ricky Williams"];
 const uid = () => Math.random().toString(36).slice(2, 10);
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+const defaultPlayers = () => SQUAD.map((name, order) => ({ id: "p-" + slug(name), name, order }));
 
 function load() {
   let s = null;
@@ -23,7 +24,7 @@ function load() {
   s.players.forEach((p, i) => { if (p.order == null) p.order = i; });
   // First run: start with the team's squad (once only, so removing a player sticks).
   // Fixed ids, so two phones seeding the same team can never create duplicates.
-  if (!s.seeded && !s.players.length) s.players = SQUAD.map((name, order) => ({ id: "p-" + slug(name), name, order }));
+  if (!s.seeded && !s.players.length) s.players = defaultPlayers();
   s.seeded = true;
   // Same for the league fixtures.
   if (!s.fixturesSeeded && !s.fixtures.length) s.fixtures = leagueFixtures();
@@ -490,9 +491,12 @@ const sync = { mod: null, teamId: null, base: null, on: false, code: store.get(C
 const gate = { code: "", error: "", busy: false };
 const needsGate = () => !sync.code && !store.get(LOCAL_KEY);
 
+const normCode = code => code.trim().toLowerCase().replace(/\s+/g, " ");
+const isDefaultCode = code => !!window.DEFAULT_TEAM_CODE && normCode(code) === normCode(window.DEFAULT_TEAM_CODE);
+
 // The team code is hashed into the database path, so the code itself never leaves the phone.
 async function teamIdFor(code) {
-  const norm = code.trim().toLowerCase().replace(/\s+/g, " ");
+  const norm = normCode(code);
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tafarn-y-fic:" + norm));
   return "t" + [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 40);
 }
@@ -553,11 +557,14 @@ async function startSync(code, mode) {
     const res = await mod.connect(teamId, { onChange: applyRemote, onStatus: setStatus });
     if (res.offline && mode !== "resume") throw new Error("Couldn't reach the shared database. Check your signal and try again.");
     const empty = !res.offline && !res.players.length && !res.fixtures.length;
+    if (mode === "join" && empty && isDefaultCode(code)) mode = "create"; // the built-in team can always be (re)created
     if (mode === "create" && !empty) throw new Error("That code is already taken. Pick a different one, or use Join team.");
     if (mode === "join" && empty) throw new Error("No team found for that code. Check the spelling.");
 
     sync.mod = mod; sync.teamId = teamId; sync.code = code; sync.on = true;
     if (mode === "create") {
+      // A brand-new team never starts empty, even from a phone whose copy was wiped.
+      if (!state.players.length && !state.fixtures.length) { state.players = defaultPlayers(); state.fixtures = leagueFixtures(); }
       sync.base = { players: [], fixtures: [] };
       save(); // sends everything on this phone to the new team
     } else {
