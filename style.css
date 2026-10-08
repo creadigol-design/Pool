@@ -53,6 +53,15 @@ body {
 .sync.offline::before, .sync.connecting::before { background: #ffd23f; }
 .sync.error { border-color: var(--pink); }
 .sync.error::before { background: var(--pink); }
+.team-tile {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer;
+  background: var(--card); border: 0; border-left: 5px solid var(--green); border-radius: 12px;
+  padding: 14px; margin-bottom: 10px; font-size: 1.1rem; color: var(--ink);
+  box-shadow: 0 1px 2px rgba(56,0,60,.08), 0 4px 14px rgba(56,0,60,.06);
+}
+.team-tile:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(56,0,60,.2); }
+.team-tile:disabled { opacity: .6; cursor: default; }
+.team-tile .tname { flex: 1; font-weight: 900; }
 main a { color: var(--purple); font-weight: 700; }
 .err { color: var(--pink); font-weight: 700; margin: 0 0 10px; }
 .tabs[hidden] { display: none; }

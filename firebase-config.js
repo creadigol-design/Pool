@@ -1,6 +1,9 @@
-// Team code every phone joins automatically. Anyone who has the site address can therefore view and edit.
-// To require a private code instead, delete this line: people will then be asked to enter one.
-window.DEFAULT_TEAM_CODE = "tafarn y fic";
+// Teams shown on the picker screen, one tap to open. Anyone who uses the site can open these,
+// so only list teams you're happy for every visitor to see and edit. To keep a team private,
+// leave it off this list: its members join with the code (or an invite link) instead.
+window.PRESET_TEAMS = [
+  { name: "Tafarn y Fic", code: "tafarn y fic", template: "tafarn" },
+];
 
 // Firebase web config. This identifies the project; it is not a secret.
 // Access is controlled by firestore.rules, not by hiding this file.

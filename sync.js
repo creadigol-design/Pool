@@ -1,6 +1,7 @@
 // Live sharing via Firestore. Loaded on demand by app.js so the app still works if this fails to load.
 //
-// Data layout:  teams/{teamId}/players/{id}   { name, order }
+// Data layout:  teams/{teamId}/meta/info      { name }
+//               teams/{teamId}/players/{id}   { name, order }
 //               teams/{teamId}/fixtures/{id}  { week, date, time, opponent, home, venue, scoreFor, scoreAgainst,
 //                                               notes, avail:{pid:..}, played:{pid:..}, frames:{pid:..} }
 // Fixtures are written field by field (avail.<pid> etc.) so two people editing the same fixture at the same
@@ -34,7 +35,7 @@ export function disconnect() {
 /* Subscribes to a team. Resolves once both collections have been read:
    { players, fixtures } (arrays of {id, ...data}) or { offline: true } if the server can't be reached in time.
    Later changes are delivered to onChange(kind, [{type, id, data}]). */
-export async function connect(teamId, { onChange, onStatus }) {
+export async function connect(teamId, { onChange, onStatus, onMeta }) {
   const s = await load();
   disconnect();
   const kinds = ["players", "fixtures"];
@@ -47,6 +48,10 @@ export async function connect(teamId, { onChange, onStatus }) {
       else onStatus("error", e);
     };
     timer = setTimeout(() => finish({ offline: true }), 8000);
+    // The team's display name. Best effort: if the rules don't allow it yet, the team still works.
+    unsubs.push(s.onSnapshot(s.collection(db, "teams", teamId, "meta"), {}, snap => {
+      for (const d of snap.docs) if (d.id === "info" && onMeta) onMeta(d.data().name);
+    }, () => {}));
     for (const kind of kinds) {
       const col = s.collection(db, "teams", teamId, kind);
       unsubs.push(s.onSnapshot(col, { includeMetadataChanges: true }, snap => {
@@ -64,6 +69,11 @@ export async function connect(teamId, { onChange, onStatus }) {
       }, fail));
     }
   });
+}
+
+export function pushMeta(teamId, name, onError) {
+  if (!fs || !db || !name) return;
+  fs.setDoc(fs.doc(db, "teams", teamId, "meta", "info"), { name }).catch(e => onError && onError(e));
 }
 
 function flat(f) {

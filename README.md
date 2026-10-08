@@ -4,7 +4,7 @@ A small web app for the Tafarn y Fic pool team to track who's playing each match
 
 No build step and no server: open `index.html` in a browser, or host the folder on any static host (GitHub Pages, Netlify, etc.).
 
-The squad (17 players) and the Division 2 2026-27 fixtures (16 matches; weeks 8 and 17 are free weeks) are pre-loaded the first time the app opens; edit it on the Squad tab. The look is a purple / neon-green football-broadcast style.
+Teams: on first open, the picker lists preloaded teams (see `PRESET_TEAMS` in `firebase-config.js`; Tafarn y Fic comes with its squad and Division 2 2026-27 fixtures). Any other team can **Create a new team** (name + a team code) and its members **Join with a code** or use an invite link. Each team's data is kept separate and shared live between its phones through Firestore (`firestore.rules` must be published in the Firebase console).
 
 ## Features
 
