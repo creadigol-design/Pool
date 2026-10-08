@@ -448,7 +448,6 @@ function viewData() {
     : h("div", { class: "card" },
         h("p", {}, h("b", {}, "This phone only. "), "Nothing you enter here is shared."),
         h("button", { class: "btn", onclick: () => { store.del(LOCAL_KEY); gate.panel = null; render(); } }, "Choose a team"));
-  const preset = presetFor(sync.code || "");
   return h("div", {}, h("h2", {}, "Data"), sharing,
     h("div", { class: "card" },
       h("p", {}, "Download a backup of everything (squad, fixtures, attendance and scores), or restore one."),
@@ -458,7 +457,7 @@ function viewData() {
           a.click(); URL.revokeObjectURL(a.href);
         } }, "Download backup"),
         h("button", { class: "btn ghost", onclick: () => fileInput.click() }, "Restore backup"), fileInput)),
-    preset && preset.template === "tafarn" ? h("div", { class: "card" },
+    sync.template === "tafarn" ? h("div", { class: "card" },
       h("p", {}, "Division 2 2026-27 fixtures come pre-loaded. If any are missing, this adds them back without touching scores you've entered."),
       h("button", { class: "btn ghost", onclick: () => {
         let n = 0;
@@ -476,20 +475,33 @@ function viewData() {
 }
 
 /* ---------- teams and live sharing ---------- */
-const CODE_KEY = "tfp-team-code", NAME_KEY = "tfp-team-name", LOCAL_KEY = "tfp-local-only";
+const CODE_KEY = "tfp-team-code", NAME_KEY = "tfp-team-name", TPL_KEY = "tfp-team-template", LOCAL_KEY = "tfp-local-only";
 const store = {
   get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } },
   del: k => { try { localStorage.removeItem(k); } catch (e) { /* private mode */ } },
 };
-const sync = { mod: null, teamId: null, base: null, on: false, code: store.get(CODE_KEY), name: store.get(NAME_KEY), status: "local" };
+const sync = { mod: null, teamId: null, base: null, on: false, code: store.get(CODE_KEY), name: store.get(NAME_KEY), template: store.get(TPL_KEY), status: "local" };
 const gate = { panel: null, name: "", code: "", error: "", busy: false };
 const needsGate = () => !sync.code && !store.get(LOCAL_KEY);
 
-// Teams everyone sees on the picker screen (set in firebase-config.js).
 const normCode = code => code.trim().toLowerCase().replace(/\s+/g, " ");
+const sha256 = async text => {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+};
+
+// Teams listed on the picker screen for everyone (PRESET_TEAMS in firebase-config.js). Private teams
+// aren't listed: KNOWN_TEAMS holds only a one-way fingerprint of their code, so the app can recognise
+// the team (name, starting squad/fixtures) once someone types the code, without the code being in the site.
 const presets = () => Array.isArray(window.PRESET_TEAMS) ? window.PRESET_TEAMS : [];
-const presetFor = code => presets().find(p => normCode(p.code) === normCode(code));
+async function presetFor(code) {
+  const n = normCode(code);
+  const listed = presets().find(p => normCode(p.code) === n);
+  if (listed) return listed;
+  const fp = await sha256("preset:" + n);
+  return (window.KNOWN_TEAMS || []).find(k => k.fingerprint === fp) || null;
+}
 
 function teamName() { return sync.name || "My team"; }
 function setTeamName(name) {
@@ -501,8 +513,7 @@ function setTeamName(name) {
 
 // The team code is hashed into the database path, so the code itself never leaves the phone.
 async function teamIdFor(code) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tafarn-y-fic:" + normCode(code)));
-  return "t" + [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 40);
+  return "t" + (await sha256("tafarn-y-fic:" + normCode(code))).slice(0, 40);
 }
 
 function setStatus(s) {
@@ -566,7 +577,7 @@ async function startSync(code, mode, opts = {}) {
   try { mod = await import("./sync.js?v=" + (window.APP_V || "dev")); }
   catch (e) { setStatus("offline"); throw new Error("Couldn't load sharing. Check you're online and try again."); }
   try {
-    const preset = presetFor(code);
+    const preset = await presetFor(code);
     const teamId = await teamIdFor(code);
     let metaName = null; // the name can arrive while we're still connecting
     const res = await mod.connect(teamId, { onChange: applyRemote, onStatus: setStatus,
@@ -578,10 +589,13 @@ async function startSync(code, mode, opts = {}) {
     if (mode === "join" && empty) throw new Error("No team found for that code. Check the spelling.");
 
     const name = opts.name || (preset && preset.name) || metaName || (mode === "resume" ? sync.name : null);
+    const template = (preset && preset.template) || (mode === "resume" ? sync.template : null);
     sync.mod = mod; sync.teamId = teamId; sync.code = code; sync.on = true;
+    sync.template = template || null;
+    if (template) store.set(TPL_KEY, template); else store.del(TPL_KEY);
     setTeamName(name);
     if (mode === "create") {
-      const tafarn = preset && preset.template === "tafarn";
+      const tafarn = template === "tafarn";
       state.players = tafarn ? defaultPlayers() : [];
       state.fixtures = tafarn ? leagueFixtures() : [];
       sync.base = { players: [], fixtures: [] };
@@ -608,6 +622,7 @@ async function startSync(code, mode, opts = {}) {
 function leaveTeam() {
   if (sync.mod) sync.mod.disconnect();
   sync.on = false; sync.code = null; sync.mod = null; sync.teamId = null;
+  sync.template = null; store.del(TPL_KEY);
   store.del(CODE_KEY); store.del(LOCAL_KEY);
   setTeamName(null);
   state.players = []; state.fixtures = []; persistLocal();

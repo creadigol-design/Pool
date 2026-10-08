@@ -1,8 +1,11 @@
-// Teams shown on the picker screen, one tap to open. Anyone who uses the site can open these,
-// so only list teams you're happy for every visitor to see and edit. To keep a team private,
-// leave it off this list: its members join with the code (or an invite link) instead.
-window.PRESET_TEAMS = [
-  { name: "Tafarn y Fic", code: "tafarn y fic", template: "tafarn" },
+// Teams listed on the picker screen: anyone who opens the site can tap these. Leave empty to keep
+// every team private (members join by typing the team code or opening an invite link).
+window.PRESET_TEAMS = [];
+
+// Private teams the app recognises once their code is typed (name + starting squad/fixtures).
+// `fingerprint` is sha256("preset:" + code, lower-cased), a one-way hash, so the code itself isn't in the site.
+window.KNOWN_TEAMS = [
+  { name: "Tafarn y Fic", template: "tafarn", fingerprint: "c97e7942502fab657f71798fdd087612a030fd4515b958e7556c1bb0e5be27d2" },
 ];
 
 // Firebase web config. This identifies the project; it is not a secret.
