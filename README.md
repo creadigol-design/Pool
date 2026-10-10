@@ -6,6 +6,10 @@ No build step and no server: open `index.html` in a browser, or host the folder 
 
 Teams: on first open, the picker lets people **Create a new team** or **Join with a code**. Teams can optionally be listed on the picker (`PRESET_TEAMS` in `firebase-config.js`); Tafarn y Fic is private, so its members type the code (the app recognises it from a one-way fingerprint in `KNOWN_TEAMS` and loads its squad and Division 2 2026-27 fixtures). Any other team creates itself with a name and a team code; its members join with the code or an invite link. Each team's data is kept separate and shared live between its phones through Firestore (`firestore.rules` must be published in the Firebase console).
 
+## Match formats
+
+Leagues score differently, so each team has a **match format**: Tafarn y Fic (Caernarfon league) is 9 frames with each player playing one; Menai (Bangor league) is 12 frames with 6 players playing two each. With a format set, a fixture records each player's frames won with one tap, the team score is worked out from them, and the Stats tab shows frames won out of played and win %. New teams choose a format when created (or later under Data); "Not set" just records a score.
+
 ## Features
 
 - **Fixtures** – next match, upcoming fixtures, matches that still need a score, and results.

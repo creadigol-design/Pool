@@ -32,14 +32,16 @@ export function disconnect() {
   unsubs = [];
 }
 
-/* Subscribes to a team. Resolves once both collections have been read:
-   { players, fixtures } (arrays of {id, ...data}) or { offline: true } if the server can't be reached in time.
-   Later changes are delivered to onChange(kind, [{type, id, data}]). */
+/* Subscribes to a team. Resolves once players, fixtures and the team's settings doc have been read:
+   { players, fixtures, hasMeta } or { offline: true } if the server can't be reached in time.
+   (A team that was just created has a settings doc but no players yet, so that doc counts as proof it exists.)
+   Later changes are delivered to onChange(kind, [{type, id, data}]); the settings doc goes to onMeta(data). */
 export async function connect(teamId, { onChange, onStatus, onMeta }) {
   const s = await load();
   disconnect();
   const kinds = ["players", "fixtures"];
   const first = {};
+  const meta = { done: false, exists: false };
   return new Promise((resolve, reject) => {
     let settled = false, timer;
     const finish = v => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } };
@@ -47,21 +49,27 @@ export async function connect(teamId, { onChange, onStatus, onMeta }) {
       if (!settled) { settled = true; clearTimeout(timer); disconnect(); reject(e); }
       else onStatus("error", e);
     };
+    const check = () => {
+      // An empty answer from the local cache proves nothing; wait for the server to say so.
+      if (!settled && meta.done && kinds.every(k => first[k] && (first[k].server || first[k].docs.length))) {
+        finish({ players: first.players.docs, fixtures: first.fixtures.docs, hasMeta: meta.exists });
+      }
+    };
     timer = setTimeout(() => finish({ offline: true }), 8000);
-    // The team's display name. Best effort: if the rules don't allow it yet, the team still works.
-    unsubs.push(s.onSnapshot(s.collection(db, "teams", teamId, "meta"), {}, snap => {
-      for (const d of snap.docs) if (d.id === "info" && onMeta) onMeta(d.data().name);
-    }, () => {}));
+    // The team's name and match format. Best effort: if the rules don't allow reading it, the team still works.
+    unsubs.push(s.onSnapshot(s.collection(db, "teams", teamId, "meta"), { includeMetadataChanges: true }, snap => {
+      const exists = snap.docs.some(d => d.id === "info");
+      for (const d of snap.docs) if (d.id === "info" && onMeta) onMeta(d.data());
+      if (exists || !snap.metadata.fromCache) { meta.done = true; meta.exists = exists; }
+      check();
+    }, () => { meta.done = true; check(); }));
     for (const kind of kinds) {
       const col = s.collection(db, "teams", teamId, kind);
       unsubs.push(s.onSnapshot(col, { includeMetadataChanges: true }, snap => {
         onStatus(snap.metadata.fromCache ? "offline" : "live");
         if (!settled) {
           first[kind] = { docs: snap.docs.map(d => ({ id: d.id, ...d.data() })), server: !snap.metadata.fromCache };
-          // An empty answer from the local cache proves nothing; wait for the server to say so.
-          if (kinds.every(k => first[k] && (first[k].server || first[k].docs.length))) {
-            finish({ players: first.players.docs, fixtures: first.fixtures.docs });
-          }
+          check();
         } else {
           const changes = snap.docChanges().map(c => ({ type: c.type, id: c.doc.id, data: c.doc.data() }));
           if (changes.length) onChange(kind, changes);
@@ -71,9 +79,15 @@ export async function connect(teamId, { onChange, onStatus, onMeta }) {
   });
 }
 
-export function pushMeta(teamId, name, onError) {
-  if (!fs || !db || !name) return;
-  fs.setDoc(fs.doc(db, "teams", teamId, "meta", "info"), { name }).catch(e => onError && onError(e));
+// meta: { name, frames?, perPlayer? }. If the database rules predate match formats, the extra fields are
+// refused, so fall back to saving just the name and tell the caller something wasn't shared.
+export function pushMeta(teamId, meta, onError) {
+  if (!fs || !db || !meta || !meta.name) return;
+  const ref = fs.doc(db, "teams", teamId, "meta", "info");
+  fs.setDoc(ref, meta).catch(e => {
+    if (Object.keys(meta).length > 1) fs.setDoc(ref, { name: meta.name }).catch(() => {}).finally(() => onError && onError(e));
+    else onError && onError(e);
+  });
 }
 
 function flat(f) {

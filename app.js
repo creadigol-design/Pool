@@ -65,8 +65,11 @@ function menaiFixtures() {
 
 // Starting squad + fixtures for a team, picked by the `template` of its KNOWN_TEAMS entry.
 const TEMPLATES = {
-  tafarn: { players: defaultPlayers, fixtures: leagueFixtures },
-  menai: { players: () => MENAI_SQUAD.map((name, order) => ({ id: "p-" + slug(name), name, order })), fixtures: menaiFixtures },
+  // Caernarfon league: 9 frames per fixture, every player plays one.
+  tafarn: { players: defaultPlayers, fixtures: leagueFixtures, format: { frames: 9, perPlayer: 1 } },
+  // Bangor league: 12 frames per fixture, teams of 6 and every player plays two.
+  menai: { players: () => MENAI_SQUAD.map((name, order) => ({ id: "p-" + slug(name), name, order })), fixtures: menaiFixtures,
+    format: { frames: 12, perPlayer: 2 } },
 };
 
 state = load();
@@ -124,6 +127,16 @@ function fmtDate(iso, long) {
 /* ---------- results ---------- */
 const hasScore = f => Number.isInteger(f.scoreFor) && Number.isInteger(f.scoreAgainst);
 const resultOf = f => !hasScore(f) ? null : f.scoreFor > f.scoreAgainst ? "W" : f.scoreFor < f.scoreAgainst ? "L" : "D";
+const winsTotal = f => Object.values(f.frames || {}).reduce((a, b) => a + (b || 0), 0);
+// With a match format set, the team score follows from the players' results, unless someone typed a
+// different score by hand (then it's left alone and the fixture screen offers to use the players' total).
+function autoScore(f, prevSum) {
+  const F = fmt();
+  const followed = !hasScore(f) || (f.scoreFor === prevSum && f.scoreAgainst === F.frames - prevSum);
+  if (!followed) return;
+  if (Object.keys(f.frames).length >= needed()) { const sum = winsTotal(f); f.scoreFor = sum; f.scoreAgainst = F.frames - sum; }
+  else { f.scoreFor = undefined; f.scoreAgainst = undefined; }
+}
 const sorted = () => [...state.fixtures].sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
 
 /* ---------- navigation ---------- */
@@ -198,7 +211,7 @@ function fixtureCard(f, highlight) {
       h("span", {}, [f.venue, r ? { W: "Win", D: "Draw", L: "Loss" }[r] : null].filter(Boolean).join(" · "))),
     h("div", { class: "fx-body" }, side(left, "l"), mid, side(right, "r")),
     !r && state.players.length ? h("div", { class: "counts" },
-      h("span", { class: "dot yes" }, `${c.yes} in`),
+      h("span", { class: "dot yes" }, fmt() ? `${c.yes}/${needed()} in` : `${c.yes} in`),
       h("span", { class: "dot maybe" }, `${c.maybe} maybe`),
       h("span", { class: "dot no" }, `${c.no} out`)) : null);
 }
@@ -244,18 +257,56 @@ function openFixture(id) {
         h("span", { class: "seg" }, btn("yes", "In"), btn("maybe", "Maybe"), btn("no", "Out"))));
     });
     const c = countsFor(f);
-    if (state.players.length) body.append(h("p", { class: "small muted" }, `${c.yes} in, ${c.maybe} maybe, ${c.no} out, ${state.players.length - c.yes - c.maybe - c.no} not replied`));
+    const F = fmt();
+    if (F) body.append(h("p", { class: "small muted" },
+      `${F.frames} frames per match, each player plays ${F.perPlayer === 1 ? "one" : F.perPlayer}: you need ${needed()} players.`));
+    if (state.players.length) body.append(h("p", { class: "small muted" },
+      `${c.yes} in${F ? ` (need ${needed()})` : ""}, ${c.maybe} maybe, ${c.no} out, ${state.players.length - c.yes - c.maybe - c.no} not replied`));
 
     /* result */
     body.append(h("h2", {}, "Result"));
-    const num = (key) => h("input", { type: "number", min: 0, inputmode: "numeric", "aria-label": key === "scoreFor" ? "Our frames" : "Their frames",
+    const num = key => h("input", { type: "number", min: 0, max: F ? F.frames : null, inputmode: "numeric",
+      "aria-label": key === "scoreFor" ? "Our frames" : "Their frames",
       value: Number.isInteger(f[key]) ? f[key] : "",
-      onchange: e => { f[key] = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10)); save(); draw(); } });
+      onchange: e => {
+        const raw = e.target.value;
+        if (raw === "") { if (F) { f.scoreFor = undefined; f.scoreAgainst = undefined; } else f[key] = undefined; }
+        else {
+          const v = Math.max(0, F ? Math.min(F.frames, parseInt(raw, 10)) : parseInt(raw, 10));
+          f[key] = v;
+          if (F) f[key === "scoreFor" ? "scoreAgainst" : "scoreFor"] = F.frames - v; // the other side takes the rest
+        }
+        save(); draw();
+      } });
     const r = resultOf(f);
     body.append(h("div", { class: "row" }, h("b", {}, teamName()), num("scoreFor"), "-", num("scoreAgainst"), h("b", {}, f.opponent),
       r ? h("span", { class: "pill " + r }, { W: "Win", D: "Draw", L: "Loss" }[r]) : null));
 
-    if (r) {
+    if (F) {
+      /* one tap per player: how many of their frames they won */
+      body.append(h("h2", {}, "Who played & frames won"));
+      const rank = p => (f.played[p.id] || f.avail[p.id] === "yes") ? 0 : f.avail[p.id] === "maybe" ? 1 : 2;
+      const list = [...state.players].sort((a, b) => rank(a) - rank(b) || (a.order - b.order));
+      const setWins = (p, v) => {
+        const prev = winsTotal(f);
+        if (f.frames[p.id] === v) { delete f.frames[p.id]; delete f.played[p.id]; } // tap again to clear
+        else { f.frames[p.id] = v; f.played[p.id] = true; }
+        autoScore(f, prev);
+        save(); draw();
+      };
+      list.forEach(p => body.append(h("div", { class: "player-row" },
+        h("span", { class: "name" }, p.name, f.frames[p.id] === undefined && f.avail[p.id] === "yes" ? h("span", { class: "small muted" }, " (in)") : null),
+        h("span", { class: "seg" }, Array.from({ length: F.perPlayer + 1 }, (_, i) =>
+          h("button", { class: (f.frames[p.id] === i ? "on " : "") + (i === 0 ? "no" : i === F.perPlayer ? "yes" : "maybe"), onclick: () => setWins(p, i) },
+            F.perPlayer === 1 ? (i ? "Won" : "Lost") : String(i)))))));
+      const recorded = Object.keys(f.frames).length, sum = winsTotal(f);
+      body.append(h("p", { class: "small muted" },
+        `${recorded} of ${needed()} players recorded${recorded ? `, ${sum} frame${sum === 1 ? "" : "s"} won` : ""}. Tap a result again to clear it.`));
+      if (recorded >= needed() && hasScore(f) && sum !== f.scoreFor) {
+        body.append(h("p", { class: "small" }, `Players' wins total ${sum}, but the team score is ${f.scoreFor}. `,
+          h("button", { class: "btn ghost small", onclick: () => { f.scoreFor = sum; f.scoreAgainst = F.frames - sum; save(); draw(); } }, `Use ${sum}`)));
+      }
+    } else if (r) {
       body.append(h("h2", {}, "Who played & frames won"));
       const tracked = state.players.filter(p => f.played[p.id] || f.avail[p.id] === "yes");
       const list = state.players;
@@ -268,7 +319,7 @@ function openFixture(id) {
           f.played[p.id] ? h("input", { type: "number", min: 0, inputmode: "numeric", "aria-label": `Frames won by ${p.name}`,
             value: f.frames[p.id] ?? "", onchange: e => { f.frames[p.id] = e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10)); save(); } }) : null));
       });
-      const total = Object.values(f.frames).reduce((a, b) => a + (b || 0), 0);
+      const total = winsTotal(f);
       if (total && total !== f.scoreFor) body.append(h("p", { class: "small muted" }, `Player frames add up to ${total}, team score is ${f.scoreFor}.`));
     }
 
@@ -449,6 +500,18 @@ function viewStats() {
     const wins = played.filter(f => resultOf(f) === "W").length;
     return { name: p.name, played: played.length, att: Math.round(100 * played.length / done.length), frames, wins };
   }).sort((a, b) => b.played - a.played || b.frames - a.frames);
+  const F = fmt();
+  if (F) {
+    // Every appearance is `perPlayer` frames, so win % = frames won / frames played.
+    const pct = r => r.played ? Math.round(100 * r.frames / (r.played * F.perPlayer)) : 0;
+    rows.sort((a, b) => pct(b) - pct(a) || b.played - a.played);
+    root.append(h("div", { class: "card" }, h("table", {},
+      h("thead", {}, h("tr", {}, ["Player", "Apps", "Frames", "Win %", "Att %"].map(t => h("th", {}, t)))),
+      h("tbody", {}, rows.map(r => h("tr", {}, h("td", {}, r.name), h("td", {}, r.played), h("td", {}, `${r.frames}/${r.played * F.perPlayer}`),
+        h("td", {}, r.played ? pct(r) + "%" : "-"), h("td", {}, r.att + "%")))))));
+    root.append(h("p", { class: "small muted" }, "Apps = fixtures played. Frames = won / played. Att % = share of completed fixtures the player played in."));
+    return root;
+  }
   root.append(h("div", { class: "card" }, h("table", {},
     h("thead", {}, h("tr", {}, ["Player", "Played", "Att %", "Frames won", "Team wins"].map(t => h("th", {}, t)))),
     h("tbody", {}, rows.map(r => h("tr", {}, h("td", {}, r.name), h("td", {}, r.played), h("td", {}, r.att + "%"), h("td", {}, r.frames), h("td", {}, r.wins)))))));
@@ -477,7 +540,14 @@ function viewData() {
     : h("div", { class: "card" },
         h("p", {}, h("b", {}, "This phone only. "), "Nothing you enter here is shared."),
         h("button", { class: "btn", onclick: () => { store.del(LOCAL_KEY); gate.panel = null; render(); } }, "Choose a team"));
-  return h("div", {}, h("h2", {}, "Data"), sharing,
+  const cur = fmt();
+  const curKey = cur ? (FORMATS.find(o => o.frames === cur.frames && o.perPlayer === cur.perPlayer) || { key: "custom" }).key : "none";
+  const formatCard = h("div", { class: "card" },
+    h("p", {}, h("b", {}, "Match format. "), "How many frames a fixture has and how many each player plays. It decides how results and player stats are recorded."),
+    h("label", {}, "Format", h("select", { onchange: e => changeFormat(e.target.value) },
+      FORMATS.filter(o => o.frames || !TEMPLATES[sync.template]).map(o => h("option", { value: o.key, selected: o.key === curKey }, o.label)),
+      curKey === "custom" ? h("option", { value: "custom", selected: true }, `${cur.frames} frames, ${cur.perPlayer} per player`) : null)));
+  return h("div", {}, h("h2", {}, "Data"), sharing, formatCard,
     h("div", { class: "card" },
       h("p", {}, "Download a backup of everything (squad, fixtures, attendance and scores), or restore one."),
       h("div", { class: "row" },
@@ -504,14 +574,37 @@ function viewData() {
 }
 
 /* ---------- teams and live sharing ---------- */
-const CODE_KEY = "tfp-team-code", NAME_KEY = "tfp-team-name", TPL_KEY = "tfp-team-template", LOCAL_KEY = "tfp-local-only";
+const CODE_KEY = "tfp-team-code", NAME_KEY = "tfp-team-name", TPL_KEY = "tfp-team-template", FMT_KEY = "tfp-team-format", LOCAL_KEY = "tfp-local-only";
 const store = {
   get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } },
   del: k => { try { localStorage.removeItem(k); } catch (e) { /* private mode */ } },
 };
-const sync = { mod: null, teamId: null, base: null, on: false, code: store.get(CODE_KEY), name: store.get(NAME_KEY), template: store.get(TPL_KEY), status: "local" };
-const gate = { panel: null, name: "", code: "", error: "", busy: false };
+const sync = { mod: null, teamId: null, base: null, on: false, code: store.get(CODE_KEY), name: store.get(NAME_KEY), template: store.get(TPL_KEY),
+  format: (() => { try { return JSON.parse(store.get(FMT_KEY)); } catch (e) { return null; } })(), status: "local" };
+const gate = { panel: null, name: "", code: "", format: "none", error: "", busy: false };
+
+// Match format: how many frames a fixture has and how many each player plays (9 x 1 in the Caernarfon league,
+// 12 x 2 in Bangor). null = not set, so results are just a score.
+const FORMATS = [
+  { key: "9x1", frames: 9, perPlayer: 1, label: "9 frames, each player plays once" },
+  { key: "12x2", frames: 12, perPlayer: 2, label: "12 frames, 6 players play twice each" },
+  { key: "none", frames: null, perPlayer: null, label: "Not set (just record the score)" },
+];
+function fmt() { const f = sync.format; return f && f.frames > 0 && f.perPlayer > 0 ? f : null; }
+function needed() { const f = fmt(); return f ? Math.round(f.frames / f.perPlayer) : null; }
+function setFormat(f) {
+  sync.format = f && f.frames ? { frames: f.frames, perPlayer: f.perPlayer } : null;
+  if (sync.format) store.set(FMT_KEY, JSON.stringify(sync.format)); else store.del(FMT_KEY);
+}
+const metaDoc = () => ({ name: teamName(), ...(fmt() ? { frames: fmt().frames, perPlayer: fmt().perPlayer } : {}) });
+function changeFormat(key) {
+  const o = FORMATS.find(x => x.key === key);
+  if (!o) return;
+  setFormat(o);
+  if (sync.on) sync.mod.pushMeta(sync.teamId, metaDoc(), () => toast("Saved on this phone, but the format can't be shared until the database rules are updated."));
+  render();
+}
 const needsGate = () => !sync.code && !store.get(LOCAL_KEY);
 
 const normCode = code => code.trim().toLowerCase().replace(/\s+/g, " ");
@@ -590,11 +683,15 @@ function applyRemote(kind, changes) {
   if (!(a && a.closest && a.closest("#view") && /INPUT|TEXTAREA|SELECT/.test(a.tagName))) render();
 }
 
-// The team's display name arrived (or changed) from the shared database.
-function applyMeta(name) {
-  if (!name || name === sync.name) return;
-  setTeamName(name);
-  render();
+// The team's name and match format arrived (or changed) in the shared database.
+function applyMeta(meta) {
+  if (!meta) return;
+  let changed = false;
+  if (meta.name && meta.name !== sync.name) { setTeamName(meta.name); changed = true; }
+  if (meta.frames > 0 && meta.perPlayer > 0 && (!sync.format || sync.format.frames !== meta.frames || sync.format.perPlayer !== meta.perPlayer)) {
+    setFormat(meta); changed = true;
+  }
+  if (changed) render();
 }
 
 // mode: "create" (new team), "join" (existing team) or "resume" (saved code).
@@ -608,28 +705,32 @@ async function startSync(code, mode, opts = {}) {
   try {
     const preset = await presetFor(code);
     const teamId = await teamIdFor(code);
-    let metaName = null; // the name can arrive while we're still connecting
+    let meta = null; // the team's settings can arrive while we're still connecting
     const res = await mod.connect(teamId, { onChange: applyRemote, onStatus: setStatus,
-      onMeta: n => { metaName = n; applyMeta(n); } });
+      onMeta: m => { meta = m; applyMeta(m); } });
     if (res.offline && mode !== "resume") throw new Error("Couldn't reach the shared database. Check your signal and try again.");
-    const empty = !res.offline && !res.players.length && !res.fixtures.length;
+    const empty = !res.offline && !res.players.length && !res.fixtures.length && !res.hasMeta;
     if (mode === "join" && empty && preset) mode = "create"; // a listed team can always be (re)created
     if (mode === "create" && !empty) throw new Error("That code is already taken. Pick a different one, or use Join with a code.");
     if (mode === "join" && empty) throw new Error("No team found for that code. Check the spelling.");
 
-    const name = opts.name || (preset && preset.name) || metaName || (mode === "resume" ? sync.name : null);
+    const name = opts.name || (preset && preset.name) || (meta && meta.name) || (mode === "resume" ? sync.name : null);
     const template = (preset && preset.template) || (mode === "resume" ? sync.template : null);
     sync.mod = mod; sync.teamId = teamId; sync.code = code; sync.on = true;
     sync.template = template || null;
     if (template) store.set(TPL_KEY, template); else store.del(TPL_KEY);
     setTeamName(name);
+    // Shared settings win; then what the creator picked; then the league's default; then what this phone had.
+    const known = TEMPLATES[template] && TEMPLATES[template].format;
+    setFormat((meta && meta.frames > 0 && meta) || opts.format || known || (mode === "resume" ? sync.format : null));
     if (mode === "create") {
       const tpl = TEMPLATES[template];
       state.players = tpl ? tpl.players() : [];
       state.fixtures = tpl ? tpl.fixtures() : [];
       sync.base = { players: [], fixtures: [] };
       save(); // sends the starting data to the new team
-      mod.pushMeta(teamId, name, () => toast("Team created, but its name can't be shared until the database rules are updated."));
+      // Leagues we already know need no shared settings; other teams share their name and format.
+      if (!tpl) mod.pushMeta(teamId, metaDoc(), () => toast("Team created, but its name or format can't be shared until the database rules are updated."));
     } else {
       if (!res.offline) { replaceFromRemote(res.players, res.fixtures); persistLocal(); }
       sync.base = snap();
@@ -652,11 +753,12 @@ function leaveTeam() {
   if (sync.mod) sync.mod.disconnect();
   sync.on = false; sync.code = null; sync.mod = null; sync.teamId = null;
   sync.template = null; store.del(TPL_KEY);
+  setFormat(null);
   store.del(CODE_KEY); store.del(LOCAL_KEY);
   setTeamName(null);
   state.players = []; state.fixtures = []; persistLocal();
   setStatus("local");
-  Object.assign(gate, { panel: null, name: "", code: "", error: "", busy: false });
+  Object.assign(gate, { panel: null, name: "", code: "", format: "none", error: "", busy: false });
   render();
 }
 
@@ -671,7 +773,7 @@ function copyInvite() {
 function viewGate() {
   const go = async (code, mode, opts) => {
     gate.error = ""; gate.busy = true; render();
-    try { await startSync(code, mode, opts); Object.assign(gate, { panel: null, name: "", code: "" }); }
+    try { await startSync(code, mode, opts); Object.assign(gate, { panel: null, name: "", code: "", format: "none" }); }
     catch (e) { gate.error = e.message; }
     gate.busy = false; render();
   };
@@ -697,11 +799,13 @@ function viewGate() {
       h("p", { class: "small muted" }, "Start your own team. You'll add your players and paste in your fixtures. Everyone on your team then joins with the code you choose."),
       field("Team name", "name", "e.g. The Red Lion A"),
       field("Team code (a few words, 6+ characters)", "code", "e.g. red lion pool 2026"),
+      h("label", {}, "Match format", h("select", { onchange: e => { gate.format = e.target.value; } },
+        FORMATS.map(o => h("option", { value: o.key, selected: gate.format === o.key }, o.label)))),
       h("button", { class: "btn", disabled: gate.busy, onclick: () => {
         gate.name = gate.name.trim(); gate.code = gate.code.trim();
         if (!gate.name) { gate.error = "Enter a team name."; render(); return; }
         if (gate.code.length < 6) { gate.error = "Use at least 6 characters for the code, for example a few words."; render(); return; }
-        go(gate.code, "create", { name: gate.name });
+        go(gate.code, "create", { name: gate.name, format: FORMATS.find(o => o.key === gate.format) });
       } }, gate.busy ? "Creating…" : "Create team")));
   } else if (gate.panel === "join") {
     root.append(h("div", { class: "card" },

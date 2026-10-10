@@ -8,10 +8,14 @@ service cloud.firestore {
 
     match /teams/{team}/meta/{id} {
       allow read, delete: if true;
-      allow create, update: if request.resource.data.keys().hasOnly(['name'])
+      allow create, update: if request.resource.data.keys().hasOnly(['name', 'frames', 'perPlayer'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() < 60;
+        && request.resource.data.name.size() < 60
+        && (!('frames' in request.resource.data)
+            || (request.resource.data.frames is int && request.resource.data.frames > 0 && request.resource.data.frames <= 30))
+        && (!('perPlayer' in request.resource.data)
+            || (request.resource.data.perPlayer is int && request.resource.data.perPlayer > 0 && request.resource.data.perPlayer <= 4));
     }
 
     match /teams/{team}/players/{id} {
