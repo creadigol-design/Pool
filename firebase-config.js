@@ -6,6 +6,7 @@ window.PRESET_TEAMS = [];
 // `fingerprint` is sha256("preset:" + code, lower-cased), a one-way hash, so the code itself isn't in the site.
 window.KNOWN_TEAMS = [
   { name: "Tafarn y Fic", template: "tafarn", fingerprint: "c97e7942502fab657f71798fdd087612a030fd4515b958e7556c1bb0e5be27d2" },
+  { name: "Menai", template: "menai", fingerprint: "97b61d6bd5321ca9c3bccc4aa64bfef18aac9d1b7212ba6f83dfab5a5c0d7987" },
 ];
 
 // Firebase web config. This identifies the project; it is not a secret.

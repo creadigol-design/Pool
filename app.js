@@ -40,6 +40,35 @@ function leagueFixtures() {
   return LEAGUE.map(([week, date, opponent, home]) =>
     ({ id: "wk" + week, week, date, time: "", opponent, home: !!home, venue: "", avail: {}, played: {}, frames: {} }));
 }
+
+/* Menai (Bangor league), season 2026-27, from the printed fixture grid. Every round is played on two dates;
+   [first date, second date, opponent, Menai at home on the first date?]. The second date is assumed to reverse
+   home/away, as in the Division 2 league. Cup dates and the no-games weeks (23 & 30 Dec, 31 Mar) aren't listed. */
+const MENAI_SQUAD = ["Tom Beckett", "Lewis Davies", "Tony Fisher", "Tudur Fostersmith", "Mat Heslop", "Cel Jones",
+  "John Jones", "Lion O'Hara", "Robin Sadler", "Lea Williams", "Shaun Williams"];
+const MENAI = [
+  ["2026-09-23", "2027-02-10", "City Misfits", 0], ["2026-09-30", "2027-02-17", "Snooker Squirrels", 0],
+  ["2026-10-07", "2027-02-24", "Mostyn A", 1], ["2026-10-14", "2027-03-10", "Yr Heulyn", 0],
+  ["2026-10-28", "2027-03-17", "Pocket Mon", 1], ["2026-11-04", "2027-03-24", "Mostyn B", 0],
+  ["2026-11-11", "2027-04-07", "Skerries", 1], ["2026-11-25", "2027-04-21", "City Misfits", 1],
+  ["2026-12-02", "2027-04-28", "Snooker Squirrels", 1], ["2026-12-09", "2027-05-05", "Mostyn A", 0],
+  ["2027-01-06", "2027-05-12", "Yr Heulyn", 1], ["2027-01-13", "2027-05-19", "Pocket Mon", 0],
+  ["2027-01-27", "2027-05-26", "Mostyn B", 1], ["2027-02-03", "2027-06-02", "Skerries", 0],
+];
+function menaiFixtures() {
+  const rows = [];
+  for (const [d1, d2, opponent, home] of MENAI) { rows.push([d1, opponent, home]); rows.push([d2, opponent, home ? 0 : 1]); }
+  rows.sort((a, b) => a[0].localeCompare(b[0]));
+  return rows.map(([date, opponent, home], i) =>
+    ({ id: "f-" + date, week: i + 1, date, time: "", opponent, home: !!home, venue: "", avail: {}, played: {}, frames: {} }));
+}
+
+// Starting squad + fixtures for a team, picked by the `template` of its KNOWN_TEAMS entry.
+const TEMPLATES = {
+  tafarn: { players: defaultPlayers, fixtures: leagueFixtures },
+  menai: { players: () => MENAI_SQUAD.map((name, order) => ({ id: "p-" + slug(name), name, order })), fixtures: menaiFixtures },
+};
+
 state = load();
 
 function persistLocal() {
@@ -457,11 +486,11 @@ function viewData() {
           a.click(); URL.revokeObjectURL(a.href);
         } }, "Download backup"),
         h("button", { class: "btn ghost", onclick: () => fileInput.click() }, "Restore backup"), fileInput)),
-    sync.template === "tafarn" ? h("div", { class: "card" },
-      h("p", {}, "Division 2 2026-27 fixtures come pre-loaded. If any are missing, this adds them back without touching scores you've entered."),
+    TEMPLATES[sync.template] ? h("div", { class: "card" },
+      h("p", {}, "The league fixtures come pre-loaded. If any are missing, this adds them back without touching scores you've entered."),
       h("button", { class: "btn ghost", onclick: () => {
         let n = 0;
-        for (const f of leagueFixtures()) {
+        for (const f of TEMPLATES[sync.template].fixtures()) {
           if (state.fixtures.some(x => x.date === f.date && x.opponent.toLowerCase() === f.opponent.toLowerCase())) continue;
           state.fixtures.push(f); n++;
         }
@@ -595,9 +624,9 @@ async function startSync(code, mode, opts = {}) {
     if (template) store.set(TPL_KEY, template); else store.del(TPL_KEY);
     setTeamName(name);
     if (mode === "create") {
-      const tafarn = template === "tafarn";
-      state.players = tafarn ? defaultPlayers() : [];
-      state.fixtures = tafarn ? leagueFixtures() : [];
+      const tpl = TEMPLATES[template];
+      state.players = tpl ? tpl.players() : [];
+      state.fixtures = tpl ? tpl.fixtures() : [];
       sync.base = { players: [], fixtures: [] };
       save(); // sends the starting data to the new team
       mod.pushMeta(teamId, name, () => toast("Team created, but its name can't be shared until the database rules are updated."));
